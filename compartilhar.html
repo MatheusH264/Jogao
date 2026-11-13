@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tela e som em rede</title>
+<style>
+  :root {
+    --bg: #101318; --panel: #1a1f26; --line: #2a313b; --text: #e6e9ee;
+    --muted: #8b95a3; --accent: #4f8cff; --ok: #3ecf8e; --bad: #ff6b6b; --warn: #f5b74f;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  #app { display: grid; grid-template-columns: 370px 1fr; height: 100%; }
+  aside { overflow-y: auto; padding: 20px 18px 40px; border-right: 1px solid var(--line); }
+  main { position: relative; overflow: auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 0 0 2px; font-weight: 600; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin: 10px 0 3px; }
+  label:first-child { margin-top: 0; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 9px; font: inherit;
+  }
+  textarea { height: 78px; resize: vertical; font: 12px/1.3 Consolas, monospace; word-break: break-all; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--text); font-size: 13.5px; }
+  .check input { width: 17px; height: 17px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 7px; padding: 9px 14px; cursor: pointer; background: var(--accent); color: #fff; }
+  button.alt { background: var(--line); color: var(--text); }
+  button.stop { background: var(--bad); }
+  button.big { width: 100%; padding: 12px; margin-top: 14px; font-size: 15px; }
+  button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+  .warn { color: var(--warn); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 10px; background: var(--bg); }
+  .link { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .link:last-child { border-bottom: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.on { background: var(--ok); }
+  .link small { color: var(--muted); margin-left: auto; text-align: right; }
+
+  #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
+  .tile { position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--line); }
+  .tile video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tile:not(.live) video { visibility: hidden; }
+  .tile .ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  .tile.live .ph { display: none; }
+  .cap { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: linear-gradient(transparent, rgba(0,0,0,.8)); opacity: 0; transition: opacity .2s; }
+  .tile:hover .cap, .cap:focus-within { opacity: 1; }
+  .cap .nm { font-weight: 600; }
+  .cap .st { color: #cfd6df; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .cap input[type=range] { width: 100px; margin-left: auto; accent-color: var(--accent); }
+  .cap button { padding: 4px 10px; font-size: 12.5px; background: rgba(255,255,255,.16); }
+  .title-chip { position: absolute; top: 8px; left: 10px; background: rgba(0,0,0,.6); padding: 2px 10px; border-radius: 12px; font-size: 13px; }
+  #empty { color: var(--muted); max-width: 440px; margin: 12vh auto 0; text-align: center; }
+  #empty h2 { color: var(--text); font-size: 18px; }
+  #preview { width: 100%; max-height: 150px; background: #000; border-radius: 6px; margin-top: 10px; display: none; }
+  @media (max-width: 900px) {
+    #app { grid-template-columns: 1fr; height: auto; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); }
+    #tiles { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { .cap { transition: none; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <h1>Tela e som em rede</h1>
+    <p class="sub">Até 3 pessoas. Qualquer um pode transmitir. Funciona em LAN e Radmin VPN, sem instalar nada.</p>
+
+    <section>
+      <label for="name">Seu nome</label>
+      <input id="name" type="text" maxlength="24">
+      <label for="ip">Meu IP na rede (opcional, recomendado no Radmin)</label>
+      <input id="ip" type="text" placeholder="ex.: 26.12.34.56">
+      <p class="hint">Digite o IP do Radmin (ou da LAN) para evitar falhas de conexão. Se ficar em branco, o navegador vai pedir permissão de microfone só para revelar o IP.</p>
+    </section>
+
+    <section>
+      <h2>Transmitir</h2>
+      <div class="row2">
+        <div><label for="res">Resolução máxima</label>
+          <select id="res"><option value="1920x1080">1080p</option><option value="2560x1440">1440p</option><option value="3840x2160" selected>4K / nativa</option></select></div>
+        <div><label for="fps">Quadros/s</label>
+          <select id="fps"><option value="30">30</option><option value="60" selected>60</option></select></div>
+        <div><label for="bitrate">Bitrate (Mbps)</label>
+          <input id="bitrate" type="number" min="2" max="80" value="20"></div>
+        <div><label for="hint">Conteúdo</label>
+          <select id="hint"><option value="motion" selected>Movimento</option><option value="detail">Texto / detalhe</option></select></div>
+      </div>
+      <label for="codec">Codec de vídeo (vale para novas conexões)</label>
+      <select id="codec">
+        <option value="H264" selected>H.264 (leve, usa a placa de vídeo)</option>
+        <option value="VP9">VP9 (mais nítido, mais CPU)</option>
+        <option value="AV1">AV1 (muito pesado)</option>
+        <option value="VP8">VP8</option>
+      </select>
+      <label for="asrc">Fonte do som (estéreo, 510 kbps)</label>
+      <select id="asrc">
+        <option value="app" selected>Só de um app que eu escolher (sem Discord, sem eco)</option>
+        <option value="system">Som do sistema inteiro (pode ecoar)</option>
+        <option value="off">Sem som</option>
+      </select>
+      <p class="hint">No modo “Só de um app”, o vídeo é a tela que você escolher e o som vem apenas do app que você apontar em seguida (o jogo, por exemplo). Discord e o som que você recebe dos outros ficam de fora. Não escolha a janela do navegador nem a do Discord. Requer Chrome ou Edge 141+ no Windows.</p>
+      <button id="toggle" class="big">Começar a transmitir</button>
+      <button id="pickAudio" class="big alt" hidden>Escolher o app do som</button>
+      <div id="shareMsg" class="hint"></div>
+      <video id="preview" muted autoplay playsinline></video>
+    </section>
+
+    <section>
+      <h2>Conexões (<span id="count">1</span>/3 pessoas)</h2>
+      <div id="linkList"><p class="hint">Ninguém conectado ainda.</p></div>
+      <div class="btns">
+        <button id="btnInvite">Criar convite</button>
+        <button id="btnJoin" class="alt">Tenho um convite</button>
+      </div>
+      <p class="hint">Só a primeira pessoa precisa trocar códigos com as outras duas: quando a terceira entra, as conexões entre elas se fecham sozinhas.</p>
+      <div id="invites"></div>
+      <div id="joinBox" class="card" hidden>
+        <label for="joinCode">1. Cole o convite que recebeu</label>
+        <textarea id="joinCode"></textarea>
+        <div class="btns"><button id="joinGo">Gerar resposta</button></div>
+        <div id="joinOut" hidden>
+          <label for="joinAns">2. Envie esta resposta de volta</label>
+          <textarea id="joinAns" readonly></textarea>
+          <div class="btns"><button id="joinCopy" class="alt">Copiar</button></div>
+        </div>
+        <div id="joinMsg" class="hint"></div>
+      </div>
+    </section>
+  </aside>
+
+  <main>
+    <div id="empty">
+      <h2>Ninguém transmitindo</h2>
+      <p>Crie um convite e envie o código para quem vai assistir, ou cole o convite que você recebeu. Depois de conectar, qualquer um pode começar a transmitir.</p>
+    </div>
+    <div id="tiles"></div>
+  </main>
+</div>
+
+<script>
+// ------------------------------------------------------------------
+// Utilidades de SDP
+// ------------------------------------------------------------------
+function setParams(paramStr, overrides) {
+  const map = new Map();
+  paramStr.split(';').filter(Boolean).forEach((kv) => {
+    const i = kv.indexOf('=');
+    if (i === -1) map.set(kv.trim(), null);
+    else map.set(kv.slice(0, i).trim(), kv.slice(i + 1).trim());
+  });
+  Object.entries(overrides).forEach(([k, v]) => map.set(k, String(v)));
+  return [...map].map(([k, v]) => (v === null ? k : `${k}=${v}`)).join(';');
+}
+
+// Opus estéreo a 510 kbps (sem DTX) e bitrate de vídeo inicial/máximo alto.
+function tuneSdp(sdp, kbps) {
+  const lines = sdp.split(/\r?\n/);
+  const opus = new Set(), video = new Set(), hasFmtp = new Set();
+  lines.forEach((l) => {
+    let m = l.match(/^a=rtpmap:(\d+) opus\/48000\/2/i); if (m) opus.add(m[1]);
+    m = l.match(/^a=rtpmap:(\d+) (VP8|VP9|AV1|H264|H265)\//i); if (m) video.add(m[1]);
+    m = l.match(/^a=fmtp:(\d+) /); if (m) hasFmtp.add(m[1]);
+  });
+  const oo = { stereo: 1, 'sprop-stereo': 1, maxaveragebitrate: 510000, maxplaybackrate: 48000, useinbandfec: 0, usedtx: 0, cbr: 1 };
+  const vo = { 'x-google-start-bitrate': Math.round(kbps * 0.5), 'x-google-min-bitrate': Math.round(kbps * 0.25), 'x-google-max-bitrate': kbps };
+  const out = [];
+  for (const l of lines) {
+    let m = l.match(/^a=fmtp:(\d+) (.*)$/);
+    if (m && opus.has(m[1])) { out.push(`a=fmtp:${m[1]} ${setParams(m[2], oo)}`); continue; }
+    if (m && video.has(m[1])) { out.push(`a=fmtp:${m[1]} ${setParams(m[2], vo)}`); continue; }
+    out.push(l);
+    m = l.match(/^a=rtpmap:(\d+) /);
+    if (m && !hasFmtp.has(m[1])) {
+      if (opus.has(m[1])) out.push(`a=fmtp:${m[1]} ${setParams('', oo)}`);
+      else if (video.has(m[1])) out.push(`a=fmtp:${m[1]} ${setParams('', vo)}`);
+    }
+  }
+  return out.join('\r\n');
+}
+
+function preferCodec(tr, name) {
+  if (!tr || !RTCRtpSender.getCapabilities) return;
+  const caps = RTCRtpSender.getCapabilities('video').codecs;
+  const want = caps.filter((c) => c.mimeType.toLowerCase() === 'video/' + name.toLowerCase());
+  if (!want.length) return;
+  try { tr.setCodecPreferences([...want, ...caps.filter((c) => !want.includes(c))]); } catch (e) { console.warn(e); }
+}
+
+// Chrome esconde o IP local atrás de nomes “.local” (mDNS), que não resolvem no Radmin.
+// Se o usuário digitou o IP, trocamos esses nomes pelo IP real.
+function fixCandidates(sdp) {
+  const ip = $('ip').value.trim();
+  return ip ? sdp.replace(/[0-9a-f-]{36}\.local/gi, ip) : sdp;
+}
+
+// Deixa a negociação enxuta (códigos de convite curtos): só Opus no áudio e só o
+// codec escolhido no vídeo. Só quem cria o convite define isso; quem responde segue a oferta.
+function slimCodecs(pc, codec) {
+  if (!RTCRtpSender.getCapabilities) return;
+  const at = getTr(pc, 'audio'), vt = getTr(pc, 'video');
+  try {
+    const opus = RTCRtpSender.getCapabilities('audio').codecs.filter((c) => c.mimeType.toLowerCase() === 'audio/opus');
+    if (at && opus.length) at.setCodecPreferences(opus);
+  } catch (e) { console.warn(e); }
+  try {
+    const caps = RTCRtpSender.getCapabilities('video').codecs.filter((c) => !/^video\/(rtx|red|ulpfec|flexfec-03)$/i.test(c.mimeType));
+    let want = caps.filter((c) => c.mimeType.toLowerCase() === 'video/' + codec.toLowerCase());
+    if (!want.length) want = caps.filter((c) => /^video\/(h264|vp8)$/i.test(c.mimeType));
+    if (vt && want.length) vt.setCodecPreferences(want);
+  } catch (e) { console.warn(e); }
+}
+
+// Mantém só candidatos UDP IPv4 (e só o IP digitado, se houver).
+function slimSdp(sdp) {
+  const ip = $('ip').value.trim();
+  const lines = sdp.split(/\r?\n/);
+  const filt = (useIp) => lines.filter((l) => {
+    if (!l.startsWith('a=candidate:')) return true;
+    const p = l.split(' ');
+    return p[2].toLowerCase() === 'udp' && !p[4].includes(':') && (!useIp || p[4] === ip);
+  });
+  const count = (arr) => arr.filter((l) => l.startsWith('a=candidate:')).length;
+  let out = ip ? filt(true) : filt(false);
+  if (!count(out)) out = filt(false);
+  if (!count(out)) return sdp;
+  return out.join('\r\n');
+}
+
+function iceDone(pc, ms = 3500) {
+  return new Promise((res) => {
+    if (pc.iceGatheringState === 'complete') return res();
+    const done = () => { clearTimeout(t); pc.removeEventListener('icegatheringstatechange', chk); res(); };
+    const chk = () => pc.iceGatheringState === 'complete' && done();
+    const t = setTimeout(done, ms);
+    pc.addEventListener('icegatheringstatechange', chk);
+  });
+}
+
+// Códigos de convite: JSON comprimido em base64
+async function pack(obj) {
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+  let bin = ''; buf.forEach((b) => (bin += String.fromCharCode(b)));
+  return 'LS1:' + btoa(bin);
+}
+async function unpack(code) {
+  code = code.trim();
+  if (!code.startsWith('LS1:')) throw new Error('Código inválido. Cole o texto inteiro, começando com LS1:');
+  const bin = atob(code.slice(4).replace(/\s/g, ''));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return JSON.parse(await new Response(stream).text());
+}
+
+// ------------------------------------------------------------------
+// Estado
+// ------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const me = { id: Math.random().toString(36).slice(2, 8) };
+const MAX_PEERS = 2;            // você + 2 = 3 pessoas
+const links = new Map();        // id remoto -> link
+const invites = new Set();      // convites pendentes
+let share = null;               // { stream, v, a }
+let ipAsked = false;
+
+$('name').value = 'Pessoa ' + me.id.slice(0, 3);
+const myName = () => $('name').value.trim() || 'Pessoa ' + me.id.slice(0, 3);
+
+function cfgNow() {
+  const [w, h] = $('res').value.split('x').map(Number);
+  return { w, h, fps: +$('fps').value, kbps: Math.max(2000, +$('bitrate').value * 1000), codec: $('codec').value, hint: $('hint').value, asrc: $('asrc').value };
+}
+const getTr = (pc, kind) => pc.getTransceivers().find((t) => t.receiver.track && t.receiver.track.kind === kind);
+
+async function ensureIP() {
+  if ($('ip').value.trim() || ipAsked) return;
+  ipAsked = true;
+  try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()); } catch {}
+}
+
+// ------------------------------------------------------------------
+// Conexões
+// ------------------------------------------------------------------
+function buildPC(isOfferer) {
+  const pc = new RTCPeerConnection({ iceServers: [], bundlePolicy: 'max-bundle' });
+  const dc = pc.createDataChannel('sig', { negotiated: true, id: 0 });
+  const link = { pc, dc, id: null, name: '', via: null, stream: new MediaStream(), live: false, stats: {}, pIn: null, pOut: null, tile: null };
+  if (isOfferer) {
+    pc.addTransceiver('video', { direction: 'sendrecv' });
+    pc.addTransceiver('audio', { direction: 'sendrecv' });
+    slimCodecs(pc, cfgNow().codec);
+  }
+  pc.ontrack = (e) => link.stream.addTrack(e.track);
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') link.everConnected = true;
+    // Antes da primeira conexão, nunca remove sozinho: a outra pessoa pode demorar o quanto quiser para colar o código.
+    if (link.id && link.everConnected && ['failed', 'closed'].includes(pc.connectionState)) removeLink(link.id);
+    renderLinks();
+  };
+  dc.onopen = () => onDcOpen(link);
+  dc.onclose = () => link.id && link.everConnected && setTimeout(() => link.dc.readyState === 'closed' && removeLink(link.id), 1500);
+  dc.onmessage = (e) => { try { onDcMessage(link, JSON.parse(e.data)); } catch (err) { console.error(err); } };
+  return link;
+}
+
+function register(link, id, name, via) {
+  link.id = id; link.name = name; link.via = via;
+  links.set(id, link);
+  makeTile(link);
+  renderLinks();
+}
+
+function removeLink(id) {
+  const link = links.get(id);
+  if (!link) return;
+  links.delete(id);
+  try { link.pc.close(); } catch {}
+  if (link.tile) link.tile.remove();
+  renderLinks();
+}
+
+async function makeOffer(link) {
+  const offer = await link.pc.createOffer();
+  offer.sdp = tuneSdp(offer.sdp, cfgNow().kbps);
+  await link.pc.setLocalDescription(offer);
+  await iceDone(link.pc);
+  return slimSdp(fixCandidates(link.pc.localDescription.sdp));
+}
+
+async function makeAnswer(link, offerSdp) {
+  await link.pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+  link.pc.getTransceivers().forEach((t) => { t.direction = 'sendrecv'; });
+  const ans = await link.pc.createAnswer();
+  ans.sdp = tuneSdp(ans.sdp, cfgNow().kbps);
+  await link.pc.setLocalDescription(ans);
+  await iceDone(link.pc);
+  return slimSdp(fixCandidates(link.pc.localDescription.sdp));
+}
+
+// ------------------------------------------------------------------
+// Canal de dados: apresentação, malha automática e retransmissão
+// ------------------------------------------------------------------
+const dcSend = (link, m) => link.dc.readyState === 'open' && link.dc.send(JSON.stringify(m));
+const peerList = (exceptId) => [...links.values()].filter((l) => l.id !== exceptId && l.dc.readyState === 'open').map((l) => ({ id: l.id, name: l.name }));
+
+function onDcOpen(link) {
+  dcSend(link, { t: 'hello', id: me.id, name: myName(), peers: peerList(link.id) });
+  links.forEach((o) => { if (o !== link) dcSend(o, { t: 'peers', list: [{ id: link.id, name: link.name }] }); });
+  if (share) applyShare(link);
+  renderLinks();
+}
+
+function onDcMessage(link, m) {
+  if (m.t === 'hello') { link.name = m.name; updateTile(link); renderLinks(); handlePeers(link, m.peers || []); }
+  else if (m.t === 'peers') handlePeers(link, m.list || []);
+  else if (m.t === 'share') { link.live = !!m.on; updateTile(link); }
+  else if (m.t === 'relay') {
+    if (m.to === me.id) handleRelay(link, m).catch(console.error);
+    else { const target = links.get(m.to); if (target) dcSend(target, m); }
+  }
+}
+
+// Quem tem o menor ID abre a conexão com o outro, passando pela pessoa em comum.
+function handlePeers(via, list) {
+  for (const q of list) {
+    if (q.id === me.id || links.has(q.id)) continue;
+    if (links.size >= MAX_PEERS) break;
+    if (me.id < q.id) startRelay(q, via).catch((e) => { console.error(e); removeLink(q.id); });
+  }
+}
+
+async function startRelay(q, via) {
+  const link = buildPC(true);
+  register(link, q.id, q.name, via.id);
+  const sdp = await makeOffer(link);
+  dcSend(via, { t: 'relay', to: q.id, from: me.id, msg: { k: 'offer', sdp, name: myName() } });
+}
+
+async function handleRelay(via, m) {
+  const { k, sdp, name } = m.msg;
+  if (k === 'offer') {
+    if (links.has(m.from) || links.size >= MAX_PEERS) return;
+    const link = buildPC(false);
+    register(link, m.from, name || 'Pessoa', via.id);
+    const ans = await makeAnswer(link, sdp);
+    dcSend(via, { t: 'relay', to: m.from, from: me.id, msg: { k: 'answer', sdp: ans } });
+  } else if (k === 'answer') {
+    const link = links.get(m.from);
+    if (link) await link.pc.setRemoteDescription({ type: 'answer', sdp });
+  }
+}
+
+// ------------------------------------------------------------------
+// Convites manuais (copiar e colar)
+// ------------------------------------------------------------------
+function copyBtn(btn, ta) {
+  btn.onclick = () => { navigator.clipboard.writeText(ta.value); const t = btn.textContent; btn.textContent = 'Copiado'; setTimeout(() => (btn.textContent = t), 1500); };
+}
+const ipWarn = (sdp) => (!$('ip').value.trim() && /\.local\b/.test(sdp)) ? ' Se não conectar, digite seu IP no campo “Meu IP” e crie o convite de novo.' : '';
+
+$('btnInvite').onclick = async () => {
+  if (links.size + invites.size >= MAX_PEERS) { alert('Limite de 3 pessoas atingido (ou convites pendentes demais).'); return; }
+  await ensureIP();
+  const link = buildPC(true);
+  const inv = { link };
+  invites.add(inv);
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<label>1. Envie este código para a outra pessoa</label>
+    <textarea class="code" readonly>Gerando…</textarea>
+    <div class="btns"><button class="alt copy">Copiar</button></div>
+    <label>2. Cole aqui a resposta dela</label><textarea class="resp"></textarea>
+    <div class="btns"><button class="go">Conectar</button><button class="alt cancel">Cancelar</button></div>
+    <div class="hint msg"></div>`;
+  $('invites').appendChild(card);
+  const code = card.querySelector('.code'), msg = card.querySelector('.msg');
+  copyBtn(card.querySelector('.copy'), code);
+  const close = () => { invites.delete(inv); card.remove(); };
+  card.querySelector('.cancel').onclick = () => { if (!link.id) link.pc.close(); close(); };
+  try {
+    const sdp = await makeOffer(link);
+    code.value = await pack({ t: 'o', i: me.id, n: myName(), s: sdp });
+    msg.textContent = ipWarn(sdp);
+  } catch (e) { code.value = ''; msg.textContent = 'Erro: ' + e.message; }
+  card.querySelector('.go').onclick = async () => {
+    try {
+      const d = await unpack(card.querySelector('.resp').value);
+      if (d.t !== 'a') throw new Error('Isto não é uma resposta. Cole o código de resposta da outra pessoa.');
+      if (links.has(d.i)) throw new Error('Essa pessoa já está conectada.');
+      if (links.size >= MAX_PEERS) throw new Error('Limite de 3 pessoas atingido.');
+      register(link, d.i, d.n, null);
+      await link.pc.setRemoteDescription({ type: 'answer', sdp: d.s });
+      close();
+    } catch (e) { msg.textContent = 'Erro: ' + e.message; }
+  };
+};
+
+$('btnJoin').onclick = () => { $('joinBox').hidden = !$('joinBox').hidden; };
+copyBtn($('joinCopy'), $('joinAns'));
+$('joinGo').onclick = async () => {
+  const msg = $('joinMsg');
+  msg.textContent = 'Gerando resposta…';
+  try {
+    await ensureIP();
+    const d = await unpack($('joinCode').value);
+    if (d.t !== 'o') throw new Error('Isto não é um convite. Cole o código criado pela outra pessoa.');
+    if (links.has(d.i)) throw new Error('Essa pessoa já está conectada.');
+    if (links.size >= MAX_PEERS) throw new Error('Limite de 3 pessoas atingido.');
+    const link = buildPC(false);
+    register(link, d.i, d.n, null);
+    const sdp = await makeAnswer(link, d.s);
+    $('joinAns').value = await pack({ t: 'a', i: me.id, n: myName(), s: sdp });
+    $('joinOut').hidden = false;
+    msg.textContent = 'Envie a resposta de volta e aguarde a conexão.' + ipWarn(sdp);
+  } catch (e) { msg.textContent = 'Erro: ' + e.message; }
+};
+
+// ------------------------------------------------------------------
+// Transmissão
+// ------------------------------------------------------------------
+const AUDIO_OPTS = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, sampleRate: 48000, sampleSize: 16 };
+
+async function startShare() {
+  $('shareMsg').textContent = '';
+  const c = cfgNow();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { width: { ideal: c.w }, height: { ideal: c.h }, frameRate: { ideal: c.fps, max: c.fps } },
+      // Só o modo “sistema inteiro” pede som junto com a tela.
+      audio: c.asrc === 'system' ? { ...AUDIO_OPTS, restrictOwnAudio: true } : false,
+      systemAudio: c.asrc === 'system' ? 'include' : 'exclude',
+      selfBrowserSurface: 'exclude',
+    });
+  } catch (e) { $('shareMsg').textContent = 'Não foi possível capturar a tela: ' + e.message; return; }
+  const v = stream.getVideoTracks()[0];
+  const a = stream.getAudioTracks()[0] || null;
+  v.contentHint = c.hint;
+  if (a) a.contentHint = 'music';
+  v.onended = stopShare;
+  share = { stream, v, a, cfg: c, junk: [] };
+  $('preview').srcObject = stream;
+  $('preview').style.display = 'block';
+  $('toggle').textContent = 'Parar transmissão';
+  $('toggle').className = 'big stop';
+  ['res', 'fps', 'bitrate', 'hint', 'asrc'].forEach((id) => ($(id).disabled = true));
+
+  if (c.asrc === 'app') {
+    $('pickAudio').hidden = false;
+    $('shareMsg').textContent = 'Vídeo no ar. Agora clique em “Escolher o app do som” e aponte o app (o jogo, por exemplo).';
+  } else if (c.asrc === 'system') {
+    if (!a) $('shareMsg').textContent = 'Nenhum áudio capturado. Escolha “Tela inteira” e marque “Compartilhar áudio do sistema”.';
+    else if (a.getSettings().restrictOwnAudio !== true) {
+      $('shareMsg').textContent = 'Atenção: este navegador não aplicou o filtro da própria aba, então pode haver eco. Pare e use o modo “Só de um app”.';
+      $('shareMsg').className = 'hint warn';
+    }
+  }
+  links.forEach(applyShare);
+}
+
+// Segunda captura: só para pegar o ÁUDIO de uma janela/app específico.
+async function pickAudio() {
+  if (!share) return;
+  $('shareMsg').className = 'hint';
+  $('shareMsg').textContent = '';
+  let s2;
+  try {
+    s2 = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: 'window' },     // o navegador exige vídeo; ele é descartado
+      audio: AUDIO_OPTS,
+      systemAudio: 'exclude',
+      windowAudio: 'window',                   // áudio só da janela escolhida
+      monitorTypeSurfaces: 'exclude',
+      selfBrowserSurface: 'exclude',
+    });
+  } catch (e) { $('shareMsg').textContent = 'Não foi possível escolher o app: ' + e.message; return; }
+  // O vídeo desta segunda captura não é usado: reduz ao mínimo e guarda para encerrar depois.
+  s2.getVideoTracks().forEach((t) => { t.applyConstraints({ width: 160, height: 90, frameRate: 1 }).catch(() => {}); share.junk.push(t); });
+  const a = s2.getAudioTracks()[0];
+  if (!a) { $('shareMsg').textContent = 'Nenhum áudio capturado. Escolha a aba “Janela”, selecione o app e marque “Compartilhar áudio”.'; return; }
+  if (share.a) share.a.stop();
+  a.contentHint = 'music';
+  a.onended = () => {
+    if (share && share.a === a) {
+      share.a = null; links.forEach(applyAudio);
+      $('shareMsg').textContent = 'O app do som foi fechado. Escolha outro.';
+    }
+  };
+  share.a = a;
+  links.forEach(applyAudio);
+  $('pickAudio').textContent = 'Trocar o app do som';
+  $('shareMsg').textContent = 'Som sendo captado de: ' + (a.label || 'app escolhido') + '.';
+}
+$('pickAudio').onclick = pickAudio;
+
+async function applyAudio(link) {
+  const at = getTr(link.pc, 'audio');
+  if (!at || link.dc.readyState !== 'open') return;
+  await at.sender.replaceTrack(share ? share.a : null).catch(console.warn);
+}
+
+function stopShare() {
+  if (!share) return;
+  share.stream.getTracks().forEach((t) => t.stop());
+  if (share.a) share.a.stop();
+  share.junk.forEach((t) => t.stop());
+  share = null;
+  $('preview').style.display = 'none';
+  $('pickAudio').hidden = true;
+  $('pickAudio').textContent = 'Escolher o app do som';
+  $('shareMsg').className = 'hint';
+  $('shareMsg').textContent = '';
+  $('toggle').textContent = 'Começar a transmitir';
+  $('toggle').className = 'big';
+  ['res', 'fps', 'bitrate', 'hint', 'asrc'].forEach((id) => ($(id).disabled = false));
+  links.forEach(applyShare);
+}
+
+async function applyShare(link) {
+  const vt = getTr(link.pc, 'video'), at = getTr(link.pc, 'audio');
+  if (!vt || !at || link.dc.readyState !== 'open') return;
+  try {
+    if (!share) {
+      await vt.sender.replaceTrack(null);
+      await at.sender.replaceTrack(null);
+      dcSend(link, { t: 'share', on: false });
+      return;
+    }
+    const c = share.cfg;
+    await vt.sender.replaceTrack(share.v);
+    await at.sender.replaceTrack(share.a);
+    const vp = vt.sender.getParameters();
+    if (!vp.encodings || !vp.encodings.length) vp.encodings = [{}];
+    Object.assign(vp.encodings[0], { maxBitrate: c.kbps * 1000, maxFramerate: c.fps, priority: 'high', networkPriority: 'high', scaleResolutionDownBy: 1 });
+    vp.degradationPreference = c.hint === 'detail' ? 'maintain-resolution' : 'maintain-framerate';
+    await vt.sender.setParameters(vp).catch((e) => console.warn('vídeo', e));
+    const ap = at.sender.getParameters();
+    if (!ap.encodings || !ap.encodings.length) ap.encodings = [{}];
+    ap.encodings[0].maxBitrate = 510000;
+    ap.encodings[0].priority = 'high';
+    await at.sender.setParameters(ap).catch((e) => console.warn('áudio', e));
+    dcSend(link, { t: 'share', on: true });
+  } catch (e) { console.error(e); }
+}
+$('toggle').onclick = () => (share ? stopShare() : startShare());
+
+// ------------------------------------------------------------------
+// Interface
+// ------------------------------------------------------------------
+function makeTile(link) {
+  const t = document.createElement('div');
+  t.className = 'tile';
+  t.innerHTML = `<video autoplay playsinline></video><div class="ph">Aguardando transmissão</div>
+    <div class="title-chip nm"></div>
+    <div class="cap"><span class="st"></span><input class="vol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"><button class="fs">Tela cheia</button></div>`;
+  const v = t.querySelector('video');
+  v.srcObject = link.stream;
+  v.onloadedmetadata = () => v.play().catch(() => {});
+  v.ondblclick = () => (document.fullscreenElement ? document.exitFullscreen() : t.requestFullscreen());
+  t.querySelector('.vol').oninput = (e) => { v.volume = +e.target.value; };
+  t.querySelector('.fs').onclick = () => v.ondblclick();
+  link.tile = t;
+  $('tiles').appendChild(t);
+  updateTile(link);
+}
+
+function updateTile(link) {
+  if (!link.tile) return;
+  link.tile.classList.toggle('live', link.live);
+  link.tile.querySelector('.nm').textContent = link.name;
+  const s = link.stats;
+  link.tile.querySelector('.st').textContent = link.live && s.res ? `${s.res}  ${s.fps} fps  ${(s.inMbps || 0).toFixed(1)} Mbps` : '';
+  $('empty').style.display = links.size ? 'none' : '';
+}
+
+function renderLinks() {
+  $('count').textContent = links.size + 1;
+  $('empty').style.display = links.size ? 'none' : '';
+  if (!links.size) { $('linkList').innerHTML = '<p class="hint">Ninguém conectado ainda.</p>'; return; }
+  $('linkList').innerHTML = '';
+  links.forEach((l) => {
+    const on = l.pc.connectionState === 'connected' && l.dc.readyState === 'open';
+    const row = document.createElement('div');
+    row.className = 'link';
+    const dot = document.createElement('span'); dot.className = 'dot' + (on ? ' on' : '');
+    const nm = document.createElement('span'); nm.textContent = l.name;
+    const sm = document.createElement('small');
+    const up = l.stats.outMbps > 0.05 ? `↑ ${l.stats.outMbps.toFixed(1)} Mbps` : '';
+    const lim = l.stats.limit && l.stats.limit !== 'none' ? ` (limite: ${l.stats.limit === 'cpu' ? 'CPU' : l.stats.limit === 'bandwidth' ? 'rede' : l.stats.limit})` : '';
+    const waiting = !l.everConnected && !on;
+    sm.textContent = on ? (up + lim || 'conectado') : waiting ? 'aguardando a outra pessoa concluir…' : l.pc.connectionState;
+    const x = document.createElement('button');
+    x.className = 'alt'; x.textContent = '×'; x.title = 'Remover'; x.setAttribute('aria-label', 'Remover ' + l.name);
+    x.style.padding = '0 9px'; x.onclick = () => removeLink(l.id);
+    row.append(dot, nm, sm, x);
+    $('linkList').appendChild(row);
+  });
+}
+
+setInterval(async () => {
+  for (const l of links.values()) {
+    if (l.pc.connectionState !== 'connected') continue;
+    let rep; try { rep = await l.pc.getStats(); } catch { continue; }
+    rep.forEach((r) => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        if (l.pIn && r.timestamp > l.pIn.t) l.stats.inMbps = ((r.bytesReceived - l.pIn.b) * 8) / ((r.timestamp - l.pIn.t) / 1000) / 1e6;
+        l.pIn = { b: r.bytesReceived, t: r.timestamp };
+        l.stats.res = r.frameWidth ? `${r.frameWidth}×${r.frameHeight}` : '';
+        l.stats.fps = Math.round(r.framesPerSecond || 0);
+      }
+      if (r.type === 'outbound-rtp' && r.kind === 'video') {
+        if (l.pOut && r.timestamp > l.pOut.t) l.stats.outMbps = ((r.bytesSent - l.pOut.b) * 8) / ((r.timestamp - l.pOut.t) / 1000) / 1e6;
+        l.pOut = { b: r.bytesSent, t: r.timestamp };
+        l.stats.limit = r.qualityLimitationReason;
+      }
+    });
+    updateTile(l);
+  }
+  renderLinks();
+}, 1000);
+
+// Navegadores bloqueiam reprodução automática até haver um clique na página.
+document.addEventListener('click', () => document.querySelectorAll('.tile video').forEach((v) => v.paused && v.play().catch(() => {})));
+
+if (!window.RTCPeerConnection || !navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+  $('shareMsg').textContent = 'Este navegador não suporta compartilhamento de tela. Use Chrome ou Edge em um computador.';
+  $('shareMsg').className = 'hint warn';
+}
+</script>
+</body>
+</html>
